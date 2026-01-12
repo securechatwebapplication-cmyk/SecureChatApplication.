@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 import secrets
 import traceback
-import resend
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
 # --- NEW: Postgres imports ---
 import psycopg2
@@ -40,13 +41,14 @@ def get_db_connection():
 
 
 # --- App config (env only; no hardcoded secrets) ---
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "onboarding@resend.dev")  # Use your verified domain
+# --- App config (env only; no hardcoded secrets) ---
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@yourdomain.com")  # Use your verified sender
 
-# Initialize Resend
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
-
+# Initialize SendGrid
+sendgrid_client = None
+if SENDGRID_API_KEY:
+    sendgrid_client = SendGridAPIClient(SENDGRID_API_KEY)
 
 # --- Twilio config ---
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -92,10 +94,10 @@ def verify_totp(secret, token):
 def send_email_otp(email, otp, otp_type="signup"):
     print(f"[DEBUG] send_email_otp called for {email} | OTP={otp} | type={otp_type}")
     """
-    Send OTP using Resend
+    Send OTP using SendGrid
     """
-    if not RESEND_API_KEY:
-        print("[RESEND] Missing Resend API key")
+    if not sendgrid_client:
+        print("[SENDGRID] Missing SendGrid API key")
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return True
 
@@ -108,24 +110,28 @@ def send_email_otp(email, otp, otp_type="signup"):
         <p>Your verification code is:</p>
         <h1 style="color:#667eea; letter-spacing:5px;">{otp}</h1>
         <p>This code will expire in 10 minutes.</p>
+        <br>
+        <p style="color: #666; font-size: 12px;">
+          If you didn't request this code, please ignore this email.
+        </p>
       </body>
     </html>
     """
 
     try:
-        params = {
-            "from": EMAIL_FROM,
-            "to": [email],
-            "subject": subject,
-            "html": html_content,
-        }
+        message = Mail(
+            from_email=EMAIL_FROM,
+            to_emails=email,
+            subject=subject,
+            html_content=html_content
+        )
         
-        response = resend.Emails.send(params)
-        print(f"[RESEND] Email sent to {email}. ID: {response['id']}")
+        response = sendgrid_client.send(message)
+        print(f"[SENDGRID] Email sent to {email}. Status: {response.status_code}")
         return True
 
     except Exception as e:
-        print("[RESEND] Failed to send email:", e)
+        print("[SENDGRID] Failed to send email:", e)
         traceback.print_exc()
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return False
@@ -789,4 +795,5 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     init_db()
     app.run(host="0.0.0.0", port=port)
+
 
