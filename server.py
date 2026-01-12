@@ -101,6 +101,11 @@ def send_email_otp(email, otp, otp_type="signup"):
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return True
 
+    if not EMAIL_FROM:
+        print("[SENDGRID] Missing EMAIL_FROM configuration")
+        print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
+        return True
+
     subject = "Your E2EE Chat Verification Code" if otp_type == "signup" else "Your E2EE Chat Login Code (2FA)"
 
     html_content = f"""
@@ -127,15 +132,32 @@ def send_email_otp(email, otp, otp_type="signup"):
         )
         
         response = sendgrid_client.send(message)
-        print(f"[SENDGRID] Email sent to {email}. Status: {response.status_code}")
-        return True
+        
+        # Check response status
+        if response.status_code >= 200 and response.status_code < 300:
+            print(f"[SENDGRID] Email sent successfully to {email}. Status: {response.status_code}")
+            return True
+        else:
+            print(f"[SENDGRID] Failed with status {response.status_code}")
+            print(f"[SENDGRID] Response body: {response.body}")
+            print(f"[SENDGRID] Response headers: {response.headers}")
+            print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
+            return False
 
     except Exception as e:
-        print("[SENDGRID] Failed to send email:", e)
+        print("[SENDGRID] Failed to send email:")
+        print(f"[SENDGRID] Error type: {type(e).__name__}")
+        print(f"[SENDGRID] Error message: {str(e)}")
+        
+        # Try to get more details from SendGrid error
+        if hasattr(e, 'body'):
+            print(f"[SENDGRID] Error body: {e.body}")
+        if hasattr(e, 'status_code'):
+            print(f"[SENDGRID] Error status code: {e.status_code}")
+        
         traceback.print_exc()
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return False
-
 def send_whatsapp_otp_via_twilio(phone, otp, otp_type="signup"):
     """
     Send OTP via WhatsApp using Twilio.
@@ -795,5 +817,6 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     init_db()
     app.run(host="0.0.0.0", port=port)
+
 
 
