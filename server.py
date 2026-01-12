@@ -12,9 +12,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 import secrets
 import traceback
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend
 
 # --- NEW: Postgres imports ---
 import psycopg2
@@ -40,12 +38,14 @@ def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
+
 # --- App config (env only; no hardcoded secrets) ---
-SMTP_EMAIL = os.environ.get("SMTP_EMAIL")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_EMAIL)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "onboarding@resend.dev")  # Use your verified domain
+
+# Initialize Resend
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 
 # --- Twilio config ---
@@ -92,10 +92,10 @@ def verify_totp(secret, token):
 def send_email_otp(email, otp, otp_type="signup"):
     print(f"[DEBUG] send_email_otp called for {email} | OTP={otp} | type={otp_type}")
     """
-    Send OTP using Gmail SMTP
+    Send OTP using Resend
     """
-    if not SMTP_EMAIL or not SMTP_PASSWORD:
-        print("[SMTP] Missing SMTP credentials")
+    if not RESEND_API_KEY:
+        print("[RESEND] Missing Resend API key")
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return True
 
@@ -112,23 +112,20 @@ def send_email_otp(email, otp, otp_type="signup"):
     </html>
     """
 
-    msg = MIMEMultipart()
-    msg["From"] = EMAIL_FROM
-    msg["To"] = email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_content, "html"))
-
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            server.send_message(msg)
-
-        print(f"[SMTP] OTP email sent to {email}")
+        params = {
+            "from": EMAIL_FROM,
+            "to": [email],
+            "subject": subject,
+            "html": html_content,
+        }
+        
+        response = resend.Emails.send(params)
+        print(f"[RESEND] Email sent to {email}. ID: {response['id']}")
         return True
 
     except Exception as e:
-        print("[SMTP] Failed to send email:", e)
+        print("[RESEND] Failed to send email:", e)
         traceback.print_exc()
         print(f"[DEV-FALLBACK] Email OTP for {email}: {otp}")
         return False
@@ -792,3 +789,4 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     init_db()
     app.run(host="0.0.0.0", port=port)
+
